@@ -113,7 +113,7 @@ export default function ChatPage() {
           className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-sm"
           href="/matches"
         >
-          Takas
+          Takaisin
         </a>
         <h1 className="text-sm text-zinc-400">Chatti</h1>
         <button
