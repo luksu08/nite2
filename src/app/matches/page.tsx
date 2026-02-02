@@ -108,7 +108,7 @@ export default function MatchesPage() {
       <header className="max-w-xl mx-auto px-6 pt-6 flex items-center justify-between">
         <h1 className="text-xl font-bold">Matchit</h1>
         <a className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-sm" href="/browse">
-          Takas
+          Takaisin
         </a>
       </header>
 
