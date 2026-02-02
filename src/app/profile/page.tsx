@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type Role = "top" | "bottom" | "vers" | "side" | "none";
@@ -15,19 +16,20 @@ type Gender =
   | "prefer_not_say";
 
 export default function ProfilePage() {
+  const sp = useSearchParams();
+  const needPhoto = sp.get("needPhoto") === "1";
+
   const [userId, setUserId] = useState<string | null>(null);
 
-  // core
   const [displayName, setDisplayName] = useState("");
-  const [birthdate, setBirthdate] = useState(""); // pidetään syntymäaika, ikä lasketaan tästä
+  const [birthdate, setBirthdate] = useState("");
   const [showAge, setShowAge] = useState(true);
 
   const [bio, setBio] = useState("");
   const [role, setRole] = useState<Role>("none");
   const [looking, setLooking] = useState<Looking>("open");
 
-  // extras
-  const [heightCm, setHeightCm] = useState<string>(""); // string -> int save-vaiheessa
+  const [heightCm, setHeightCm] = useState<string>("");
   const [weightKg, setWeightKg] = useState<string>("");
   const [gender, setGender] = useState<Gender>("prefer_not_say");
   const [pronouns, setPronouns] = useState("");
@@ -35,8 +37,8 @@ export default function ProfilePage() {
   const [showCity, setShowCity] = useState(false);
   const [city, setCity] = useState("");
 
-  // photo
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [hasAnyPhoto, setHasAnyPhoto] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string>("");
@@ -45,7 +47,6 @@ export default function ProfilePage() {
     if (!birthdate) return null;
     const b = new Date(birthdate);
     if (Number.isNaN(b.getTime())) return null;
-
     const now = new Date();
     let a = now.getFullYear() - b.getFullYear();
     const m = now.getMonth() - b.getMonth();
@@ -69,7 +70,7 @@ export default function ProfilePage() {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "display_name, birthdate, bio, role, looking, show_city, city, height_cm, weight_kg, gender, pronouns, show_age"
+        "display_name, birthdate, show_age, bio, role, looking, show_city, city, height_cm, weight_kg, gender, pronouns"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -79,6 +80,8 @@ export default function ProfilePage() {
 
     setDisplayName(data.display_name ?? "");
     setBirthdate(data.birthdate ?? "");
+    setShowAge(data.show_age ?? true);
+
     setBio(data.bio ?? "");
     setRole((data.role ?? "none") as Role);
     setLooking((data.looking ?? "open") as Looking);
@@ -90,11 +93,10 @@ export default function ProfilePage() {
     setWeightKg(data.weight_kg ? String(data.weight_kg) : "");
     setGender((data.gender ?? "prefer_not_say") as Gender);
     setPronouns(data.pronouns ?? "");
-    setShowAge(data.show_age ?? true);
   }
 
   async function loadMyPhoto(uid: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("photos")
       .select("path")
       .eq("user_id", uid)
@@ -102,14 +104,25 @@ export default function ProfilePage() {
       .order("created_at", { ascending: true })
       .limit(1);
 
-    const path = data?.[0]?.path as string | undefined;
-    if (!path) return setPhotoUrl(null);
+    if (error) return;
 
-    const { data: signed } = await supabase.storage
+    const path = data?.[0]?.path as string | undefined;
+
+    if (!path) {
+      setPhotoUrl(null);
+      setHasAnyPhoto(false);
+      return;
+    }
+
+    setHasAnyPhoto(true);
+
+    const { data: signed, error: sErr } = await supabase.storage
       .from("photos")
       .createSignedUrl(path, 60 * 10);
 
-    setPhotoUrl(signed?.signedUrl ?? null);
+    if (sErr) return;
+
+    setPhotoUrl(signed.signedUrl);
   }
 
   async function upload(file: File) {
@@ -215,9 +228,10 @@ export default function ProfilePage() {
     setBusy(false);
 
     if (error) setMsg(error.message);
-    else setMsg("Tallennettu.");
-    await loadProfile(userId);
-
+    else {
+      setMsg("Tallennettu.");
+      await loadProfile(userId);
+    }
   }
 
   return (
@@ -229,8 +243,15 @@ export default function ProfilePage() {
         </a>
       </header>
 
+      {needPhoto && !hasAnyPhoto && (
+        <div className="max-w-xl mx-auto px-6 mt-4">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-zinc-200">
+            Lisää vähintään 1 kuva ennen kuin pääset selaamaan.
+          </div>
+        </div>
+      )}
+
       <section className="max-w-xl mx-auto px-6 py-8 space-y-4">
-        {/* PHOTO */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950 overflow-hidden">
           <div className="h-80 bg-zinc-900 flex items-center justify-center">
             {photoUrl ? (
@@ -253,7 +274,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* EDIT */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 space-y-4">
           <p className="text-zinc-300 font-semibold">Muokkaa tietoja</p>
 
@@ -390,11 +410,7 @@ export default function ProfilePage() {
 
           <div className="space-y-2">
             <label className="flex items-center gap-3 text-zinc-200">
-              <input
-                type="checkbox"
-                checked={showCity}
-                onChange={(e) => setShowCity(e.target.checked)}
-              />
+              <input type="checkbox" checked={showCity} onChange={(e) => setShowCity(e.target.checked)} />
               Näytä kaupunki
             </label>
             {showCity && (

@@ -6,11 +6,18 @@ import { supabase } from "@/lib/supabaseClient";
 type Candidate = {
   id: string;
   display_name: string;
+  birthdate: string | null;
+  show_age: boolean;
+  height_cm: number | null;
+  weight_kg: number | null;
+
   role: string;
   looking: string;
   bio: string;
+
   show_city: boolean;
   city: string | null;
+
   photoUrl?: string | null;
 };
 
@@ -22,6 +29,17 @@ type MatchRow = {
 };
 
 const SEEN_KEY = (uid: string) => `getnite_seen_${uid}`;
+
+function calcAge(birthdate: string | null): number | null {
+  if (!birthdate) return null;
+  const b = new Date(birthdate);
+  if (Number.isNaN(b.getTime())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
+  return a;
+}
 
 export default function BrowsePage() {
   const [loading, setLoading] = useState(true);
@@ -42,14 +60,45 @@ export default function BrowsePage() {
       if (!user) return (window.location.href = "/login");
       setMe(user.id);
 
-      const prof = await supabase
+      // 1) varmista profiili + nimi + syntymäaika
+      const { data: prof, error: pErr } = await supabase
         .from("profiles")
-        .select("id")
+        .select("id, display_name, birthdate")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (!prof.data) return (window.location.href = "/onboarding");
+      if (pErr) {
+        alert(pErr.message);
+        return;
+      }
 
+      if (!prof) return (window.location.href = "/onboarding");
+      if (!prof.display_name || String(prof.display_name).trim().length < 2) {
+        return (window.location.href = "/onboarding");
+      }
+      if (!prof.birthdate) {
+        return (window.location.href = "/onboarding");
+      }
+
+      // 2) vaadi vähintään 1 kuva
+      const { data: myPhoto, error: phErr } = await supabase
+        .from("photos")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+
+      if (phErr) {
+        alert(phErr.message);
+        return;
+      }
+
+      if (!myPhoto || myPhoto.length === 0) {
+        // ohjaa profiiliin lisäämään kuva
+        window.location.href = "/profile?needPhoto=1";
+        return;
+      }
+
+      // 3) lataa browse
       await loadCandidates(false);
       setLoading(false);
     })();
@@ -83,16 +132,13 @@ export default function BrowsePage() {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
 
-    // 1) hae matchatut
+    // matchatut
     const { data: matches, error: mErr } = await supabase
       .from("matches")
       .select("id, user_a, user_b, created_at")
       .or(`user_a.eq.${user.id},user_b.eq.${user.id}`);
 
-    if (mErr) {
-      alert(mErr.message);
-      return;
-    }
+    if (mErr) return alert(mErr.message);
 
     const matchedIds = new Set<string>();
     (matches ?? []).forEach((m: any) => {
@@ -100,29 +146,22 @@ export default function BrowsePage() {
       matchedIds.add(other);
     });
 
-    // 2) hae jo liketetyt (ettei tule uudestaan)
+    // omat like't
     const { data: myLikes, error: lErr } = await supabase
       .from("likes")
       .select("to_user")
       .eq("from_user", user.id);
 
-    if (lErr) {
-      alert(lErr.message);
-      return;
-    }
-
+    if (lErr) return alert(lErr.message);
     const likedIds = new Set<string>((myLikes ?? []).map((r: any) => r.to_user));
 
-    // 3) hae blokit (molempiin suuntiin)
+    // blokit molempiin suuntiin
     const { data: blocks, error: bErr } = await supabase
       .from("blocks")
       .select("blocker, blocked")
       .or(`blocker.eq.${user.id},blocked.eq.${user.id}`);
 
-    if (bErr) {
-      alert(bErr.message);
-      return;
-    }
+    if (bErr) return alert(bErr.message);
 
     const blockedIds = new Set<string>();
     (blocks ?? []).forEach((r: any) => {
@@ -130,25 +169,27 @@ export default function BrowsePage() {
       if (r.blocked === user.id) blockedIds.add(r.blocker);
     });
 
-    // 4) seen list (local)
     const seen = getSeen(user.id);
 
-    // 5) hae profiilit
+    // profiilit (mukaan syntymäaika + stats)
     const { data: profs, error: pErr } = await supabase
       .from("profiles")
-      .select("id, display_name, role, looking, bio, show_city, city, is_active")
+      .select(
+        "id, display_name, birthdate, show_age, height_cm, weight_kg, role, looking, bio, show_city, city, is_active"
+      )
       .eq("is_active", true)
       .neq("id", user.id)
-      .limit(120);
+      .limit(160);
 
-    if (pErr) {
-      alert(pErr.message);
-      return;
-    }
+    if (pErr) return alert(pErr.message);
 
     const baseAll = (profs ?? []).map((p: any) => ({
       id: p.id,
       display_name: p.display_name ?? "",
+      birthdate: p.birthdate ?? null,
+      show_age: p.show_age ?? true,
+      height_cm: p.height_cm ?? null,
+      weight_kg: p.weight_kg ?? null,
       role: p.role ?? "none",
       looking: p.looking ?? "open",
       bio: p.bio ?? "",
@@ -156,7 +197,6 @@ export default function BrowsePage() {
       city: p.city ?? null,
     })) as Candidate[];
 
-    // 6) suodatus: ei omaa, ei match, ei liked, ei blocked, ei seen
     const filtered = baseAll.filter((p) => {
       if (p.id === user.id) return false;
       if (matchedIds.has(p.id)) return false;
@@ -166,7 +206,6 @@ export default function BrowsePage() {
       return true;
     });
 
-    // jos tyhjä ja ei sallittu repeat → sallitaan repeat (mut silti ei match/liked/blocked)
     const finalList =
       filtered.length > 0
         ? filtered
@@ -183,7 +222,7 @@ export default function BrowsePage() {
       return;
     }
 
-    // 7) hae primary-kuvat ja signed urlit
+    // kuvat
     const ids = finalList.map((p) => p.id);
     const { data: photos } = await supabase
       .from("photos")
@@ -238,7 +277,6 @@ export default function BrowsePage() {
       return;
     }
 
-    // tarkista match (fallback: OR query, ei vaadi user_low/user_high)
     const { data: match } = await supabase
       .from("matches")
       .select("id, user_a, user_b, created_at")
@@ -314,6 +352,8 @@ export default function BrowsePage() {
     );
   }
 
+  const age = current ? calcAge(current.birthdate) : null;
+
   return (
     <main className="min-h-screen bg-black text-white">
       <header className="max-w-xl mx-auto px-6 pt-6 flex items-center justify-between">
@@ -326,7 +366,7 @@ export default function BrowsePage() {
             Matchit
           </a>
           <button className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-sm" onClick={logout}>
-            Kirjaudu ulos
+            Ulos
           </button>
         </div>
       </header>
@@ -335,9 +375,6 @@ export default function BrowsePage() {
         {!current ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-8 text-center">
             <p className="text-lg font-semibold">Ei enempää profiileja nyt.</p>
-            <p className="text-zinc-400 mt-2">
-              Voit ladata lisää. Jos näit jo kaikki, se alkaa lopulta näyttää samoja (mut ei matchattuja / liketettyjä).
-            </p>
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button
                 className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-700"
@@ -369,7 +406,27 @@ export default function BrowsePage() {
                     <p className="text-zinc-200 mt-1">
                       {current.role} · {current.looking}
                     </p>
+
+                    {/* STATS ROW */}
+                    <div className="flex flex-wrap gap-2 mt-3 text-xs">
+                      {current.show_age && age !== null && (
+                        <span className="px-2 py-1 rounded-full bg-white/10 border border-white/10">
+                          {age} v
+                        </span>
+                      )}
+                      {current.height_cm !== null && (
+                        <span className="px-2 py-1 rounded-full bg-white/10 border border-white/10">
+                          {current.height_cm} cm
+                        </span>
+                      )}
+                      {current.weight_kg !== null && (
+                        <span className="px-2 py-1 rounded-full bg-white/10 border border-white/10">
+                          {current.weight_kg} kg
+                        </span>
+                      )}
+                    </div>
                   </div>
+
                   <div className="text-right text-zinc-300 text-sm">
                     {current.show_city && current.city ? current.city : ""}
                   </div>
@@ -417,10 +474,7 @@ export default function BrowsePage() {
               <p className="text-2xl font-bold mt-1">{matchOverlay.name}</p>
 
               <div className="mt-5 grid grid-cols-2 gap-3">
-                <button
-                  className="p-3 rounded-xl bg-zinc-900 border border-zinc-700"
-                  onClick={() => setMatchOverlay(null)}
-                >
+                <button className="p-3 rounded-xl bg-zinc-900 border border-zinc-700" onClick={() => setMatchOverlay(null)}>
                   Sulje
                 </button>
                 <a
