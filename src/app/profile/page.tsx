@@ -216,6 +216,8 @@ export default function ProfilePage() {
 
     if (error) setMsg(error.message);
     else setMsg("Tallennettu.");
+    await loadProfile(userId);
+
   }
 
   return (

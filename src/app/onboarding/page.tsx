@@ -13,50 +13,93 @@ export default function OnboardingPage() {
   const [looking, setLooking] = useState<Looking>("hookup");
   const [showCity, setShowCity] = useState(false);
   const [city, setCity] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
       const user = (await supabase.auth.getUser()).data.user;
       if (!user) window.location.href = "/login";
+
+      // jos profiili on jo olemassa, täytetään kentät valmiiksi
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name, birthdate, role, looking, show_city, city")
+        .eq("id", user!.id)
+        .maybeSingle();
+
+      if (data) {
+        setName(data.display_name ?? "");
+        setBirthdate(data.birthdate ?? "");
+        setRole((data.role ?? "none") as Role);
+        setLooking((data.looking ?? "hookup") as Looking);
+        setShowCity(!!data.show_city);
+        setCity(data.city ?? "");
+      }
     })();
   }, []);
 
-  function isAdult(dateStr: string) {
+  function calcAge(dateStr: string) {
     const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return null;
     const now = new Date();
-    const adult = new Date(now.getFullYear() - 18, now.getMonth(), now.getDate());
-    return d <= adult;
+    let a = now.getFullYear() - d.getFullYear();
+    const m = now.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+    return a;
   }
 
   async function save() {
-    const user = (await supabase.auth.getUser()).data.user;
-    if (!user) return alert("Et ole kirjautunut.");
+    setMsg("");
+    setBusy(true);
 
-    if (!name || name.length < 2) return alert("Nimi liian lyhyt.");
-    if (!birthdate) return alert("Syntymäaika puuttuu.");
-    if (!isAdult(birthdate)) return alert("18+ only.");
-    if (showCity && !city.trim()) return alert("Kirjoita kaupunki tai ota asetus pois.");
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+
+    const n = name.trim();
+    if (n.length < 2 || n.length > 24) {
+      setBusy(false);
+      return setMsg("Nimi pitää olla 2–24 merkkiä.");
+    }
+
+    if (!birthdate) {
+      setBusy(false);
+      return setMsg("Syntymäaika puuttuu.");
+    }
+
+    const a = calcAge(birthdate);
+    if (a !== null && a < 18) {
+      setBusy(false);
+      return setMsg("18+ only.");
+    }
+
+    const c = showCity ? city.trim() : "";
+    if (showCity && c.length === 0) {
+      setBusy(false);
+      return setMsg("Kaupunki puuttuu (tai ota asetus pois).");
+    }
 
     const { error } = await supabase.from("profiles").upsert({
       id: user.id,
-      display_name: name,
-      birthdate,
+      display_name: n,
+      birthdate, // TÄRKEÄ: tallennetaan aina
       role,
       looking,
       show_city: showCity,
-      city: showCity ? city.trim() : null,
+      city: showCity ? c : null,
       is_active: true,
     });
 
-    if (error) alert(error.message);
+    setBusy(false);
+
+    if (error) setMsg(error.message);
     else window.location.href = "/browse";
   }
 
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center">
       <div className="w-full max-w-md space-y-4 p-6">
-        <h1 className="text-2xl font-bold">Profiili</h1>
-        <p className="text-zinc-400">Nopea. Ytimekäs. 18+.</p>
+        <h1 className="text-2xl font-bold">Luo profiili</h1>
 
         <input
           className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-700"
@@ -103,7 +146,6 @@ export default function OnboardingPage() {
             type="checkbox"
             checked={showCity}
             onChange={(e) => setShowCity(e.target.checked)}
-            className="h-4 w-4"
           />
           Näytä kaupunki
         </label>
@@ -111,7 +153,7 @@ export default function OnboardingPage() {
         {showCity && (
           <input
             className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-700"
-            placeholder="Kaupunki (esim. Kotka)"
+            placeholder="Kaupunki"
             value={city}
             onChange={(e) => setCity(e.target.value)}
           />
@@ -119,10 +161,13 @@ export default function OnboardingPage() {
 
         <button
           onClick={save}
-          className="w-full p-3 rounded-xl bg-white text-black font-semibold"
+          disabled={busy}
+          className="w-full p-3 rounded-xl bg-white text-black font-semibold disabled:opacity-60"
         >
-          Valmis
+          Jatka
         </button>
+
+        {msg && <p className="text-zinc-400 text-sm">{msg}</p>}
       </div>
     </main>
   );
