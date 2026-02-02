@@ -326,7 +326,7 @@ export default function BrowsePage() {
             Matchit
           </a>
           <button className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-sm" onClick={logout}>
-            Ulos
+            Kirjaudu ulos
           </button>
         </div>
       </header>
