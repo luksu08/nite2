@@ -51,14 +51,14 @@ async function signInPassword() {
 
         <input
           className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-700"
-          placeholder="email"
+          placeholder="sähköposti"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
 
         <input
   className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-700"
-  placeholder="password"
+  placeholder="salasana"
   type="password"
   value={password}
   onChange={(e) => setPassword(e.target.value)}
