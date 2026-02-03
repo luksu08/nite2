@@ -1,5 +1,10 @@
 "use client";
 
+<div style={{padding: 12, background: "yellow", color: "black", fontWeight: 700}}>
+  BUILD TEST: 2026-02-03 12:45
+</div>
+
+
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
